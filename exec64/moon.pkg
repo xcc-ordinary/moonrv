@@ -1,0 +1,4 @@
+import {
+  "xcc-ordinary/moonrv/isa",
+  "xcc-ordinary/moonrv/memory",
+}

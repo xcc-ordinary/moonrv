@@ -59,7 +59,7 @@ fn run_suite() -> Unit {
     }
   }
   println("----")
-  println("rv32ui-p: \{passed}/\{total} passed")
+  println("riscv-tests: \{passed}/\{total} passed")
 }
 
 ///|
@@ -68,7 +68,7 @@ fn run_image(name : String) -> Unit {
     Some(data) =>
       match @suite.run_data(data) {
         Some(hart) => {
-          let out = hart.stdout_string()
+          let out = hart.stdout
           if out.length() > 0 {
             println(out)
           }

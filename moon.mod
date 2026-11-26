@@ -1,6 +1,6 @@
 name = "xcc-ordinary/moonrv"
 
-version = "0.0.2"
+version = "0.0.3"
 
 repository = "https://github.com/xcc-ordinary/moonrv"
 

@@ -392,6 +392,8 @@ pub fn Hart::step(self : Hart) -> StepResult {
       self.pc = self.pc + ilen
       StepResult::Ok
     }
+    @isa.Instr::OpImm32(_, _, _, _, _) => StepResult::Unsupported(0)
+    @isa.Instr::Op32(_, _, _, _, _) => StepResult::Unsupported(0)
     @isa.Instr::Unsupported(w) => StepResult::Unsupported(w)
   }
 }

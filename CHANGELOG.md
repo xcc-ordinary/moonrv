@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.0.3 — RV64IM + full official suite green
+
+- New `exec64` package: isolated Int64 hart (RV64I + W-word ops + M), so the
+  verified RV32 path cannot regress. 128-bit high-multiply (MULH/MULHSU/MULHU)
+  via 16-bit limbs; unsigned DIVU/REMU via binary long division.
+- `isa`: RV64 opcodes OP-IMM-32 / OP-32, 6-bit shift amounts; `elf`: ELF64
+  loader; `memory`: 64-bit load/store.
+- **Acceptance: rv64ui-p 54/54 and rv64um-p 13/13 pass.** Combined official
+  matrix now **118/118** (rv32ui 42 + rv32um 8 + rv32uc 1 + rv64ui 54 + rv64um 13)
+  plus hello-world. 16 tests green on wasm + wasm-gc.
+- Suite fixtures stored as hex strings (wasm data segments) to stay under the
+  per-function size limit; decoded at runtime. Matrix: `docs/riscv-tests-results.txt`.
+
 ## 0.0.2 — week-1 milestone: rv32ui green
 
 - **Full RV32I** decode + execute: OP-IMM / OP / LUI / AUIPC / JAL / JALR /

@@ -3,3 +3,4 @@ target/
 .mooncakes/
 *.mi
 *.core
+*.mbti

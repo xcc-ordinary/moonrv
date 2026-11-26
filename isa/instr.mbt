@@ -14,6 +14,8 @@ pub(all) enum Instr {
   Store(Int, Int, Int, Int) // funct3, rs1, rs2, imm_s
   OpImm(Int, Int, Int, Int, Int) // funct3, rd, rs1, imm_i (or shamt), funct7
   Op(Int, Int, Int, Int, Int) // funct3, rd, rs1, rs2, funct7
+  OpImm32(Int, Int, Int, Int, Int) // RV64 *W: funct3, rd, rs1, imm/shamt, funct7
+  Op32(Int, Int, Int, Int, Int) // RV64 *W: funct3, rd, rs1, rs2, funct7
   Csr(Int, Int, Int, Int) // funct3, rd, csr, rs1 (or zimm)
   Ecall
   Ebreak
@@ -79,12 +81,20 @@ pub fn decode(word : Int) -> Instr {
     0x23 => Instr::Store(funct3, rs1, rs2, imm_s(word))
     0x13 =>
       if funct3 == 1 || funct3 == 5 {
-        // SLLI / SRLI / SRAI: imm field is the shift amount, funct7 selects SRA.
-        Instr::OpImm(funct3, rd, rs1, (word >> 20) & 0x1F, funct7)
+        // SLLI / SRLI / SRAI: imm field is the shift amount (6 bits for RV64;
+        // bit 5 is always 0 in valid RV32), funct7 selects SRA.
+        Instr::OpImm(funct3, rd, rs1, (word >> 20) & 0x3F, funct7)
       } else {
         Instr::OpImm(funct3, rd, rs1, imm_i(word), 0)
       }
     0x33 => Instr::Op(funct3, rd, rs1, rs2, funct7)
+    0x1B =>
+      if funct3 == 1 || funct3 == 5 {
+        Instr::OpImm32(funct3, rd, rs1, (word >> 20) & 0x1F, funct7)
+      } else {
+        Instr::OpImm32(funct3, rd, rs1, imm_i(word), 0)
+      }
+    0x3B => Instr::Op32(funct3, rd, rs1, rs2, funct7)
     0x73 =>
       if word == 0x00000073 {
         Instr::Ecall

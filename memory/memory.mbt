@@ -63,6 +63,19 @@ pub fn Memory::write_u32(self : Memory, addr : Int, value : Int) -> Unit {
 }
 
 ///|
+pub fn Memory::read_u64(self : Memory, addr : Int) -> Int64 {
+  let lo = self.read_u32(addr).to_int64() & 0xFFFFFFFFL
+  let hi = self.read_u32(addr + 4).to_int64() & 0xFFFFFFFFL
+  lo | (hi << 32)
+}
+
+///|
+pub fn Memory::write_u64(self : Memory, addr : Int, value : Int64) -> Unit {
+  self.write_u32(addr, (value & 0xFFFFFFFFL).to_int())
+  self.write_u32(addr + 4, ((value >> 32) & 0xFFFFFFFFL).to_int())
+}
+
+///|
 // Copy a run of guest bytes (each 0..255) starting at guest address `addr`.
 pub fn Memory::write_bytes(self : Memory, addr : Int, data : Array[Int]) -> Unit {
   for i = 0; i < data.length(); i = i + 1 {
