@@ -37,6 +37,13 @@ fn main {
         } else {
           println("usage: moonrv disasm <name> [count]")
         }
+      "bench" =>
+        if args.length() >= 3 {
+          bench_image(args[2])
+        } else {
+          bench_image("sieve-rv32")
+          bench_image("sieve-rv64")
+        }
       _ => print_usage()
     }
   } else {
@@ -49,8 +56,9 @@ fn print_usage() -> Unit {
   println("moonrv - pure-MoonBit RISC-V user-mode ISA simulator")
   println("")
   println("usage:")
-  println("  moonrv suite          Run the official riscv-tests suite (118 tests)")
-  println("  moonrv run <name>     Run one embedded ELF (e.g. hello, rv32ui-p-add)")
+  println("  moonrv suite          Run the official riscv-tests suite (148 tests)")
+  println("  moonrv run <name>     Run one embedded ELF (e.g. hello, fib)")
+  println("  moonrv bench [name]   Instruction-count benchmark (default: sieve)")
   println("  moonrv trace <name> [max]   Single-step trace an RV32 image")
   println("  moonrv disasm <name> [n]    Disassemble an RV32 image")
   println("  moonrv list           List embedded ELF images")
@@ -104,7 +112,8 @@ fn run_suite() -> Unit {
   let mut total = 0
   for entry in @suite.registry() {
     let (name, data) = entry
-    if name == "hello" {
+    if name == "hello" || name == "fib" || name == "sieve-rv32" ||
+      name == "sieve-rv64" {
       continue
     }
     total = total + 1
@@ -142,6 +151,26 @@ fn run_image(name : String) -> Unit {
               "[FAIL] \{name} code=\{hart.fail_code} bad_word=\{hart.bad_word}",
             )
           }
+        }
+        None => println("invalid ELF image: \{name}")
+      }
+    None => println("unknown image: \{name}   (see: moonrv list)")
+  }
+}
+
+///|
+fn bench_image(name : String) -> Unit {
+  match @suite.lookup(name) {
+    Some(data) =>
+      match @suite.run_data(data) {
+        Some(hart) => {
+          let out = hart.stdout
+          if out.length() > 0 {
+            println(out)
+          }
+          println(
+            "[bench] \{name}: \{hart.steps} instructions, exit=\{hart.exit_code}",
+          )
         }
         None => println("invalid ELF image: \{name}")
       }
