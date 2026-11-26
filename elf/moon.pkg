@@ -1,0 +1,3 @@
+import {
+  "xcc-ordinary/moonrv/memory",
+}

@@ -1,16 +1,24 @@
 ///|
-// Instruction vocabulary. Walking skeleton covers a small correct RV32I subset;
-// the full RV32IMC / RV64IMC vocabulary is filled in during week 1+ (see
-// docs/week1-rv32ui-checklist.md). Variants carry decoded fields, not raw bits.
+// RISC-V instruction vocabulary. Week-1 covers the full RV32I base integer ISA
+// plus the Zicsr instructions and MRET needed to run the official riscv-tests
+// `p` environment, and FENCE/FENCE.I (treated as barriers / no-ops). Variants
+// carry decoded fields, not raw bits. M / C / RV64 widening arrive in week 2+.
 #derive(Debug, Eq)
 pub(all) enum Instr {
-  Lui(Int, Int) // rd, imm_u (already shifted into place)
+  Lui(Int, Int) // rd, imm_u (already in place)
   Auipc(Int, Int) // rd, imm_u
-  Addi(Int, Int, Int) // rd, rs1, imm_i (sign-extended)
-  Add(Int, Int, Int) // rd, rs1, rs2
-  Sub(Int, Int, Int) // rd, rs1, rs2
+  Jal(Int, Int) // rd, imm_j
+  Jalr(Int, Int, Int) // rd, rs1, imm_i
+  Branch(Int, Int, Int, Int) // funct3, rs1, rs2, imm_b
+  Load(Int, Int, Int, Int) // funct3, rd, rs1, imm_i
+  Store(Int, Int, Int, Int) // funct3, rs1, rs2, imm_s
+  OpImm(Int, Int, Int, Int, Int) // funct3, rd, rs1, imm_i (or shamt), funct7
+  Op(Int, Int, Int, Int, Int) // funct3, rd, rs1, rs2, funct7
+  Csr(Int, Int, Int, Int) // funct3, rd, csr, rs1 (or zimm)
   Ecall
   Ebreak
+  Mret
+  Fence
   Unsupported(Int) // raw word, for diagnostics
 }
 
@@ -22,9 +30,38 @@ pub fn sign_extend(value : Int, bits : Int) -> Int {
 }
 
 ///|
-// Decode one 32-bit RV32 instruction word. Skeleton handles LUI/AUIPC/ADDI/
-// ADD/SUB/ECALL/EBREAK correctly; everything else returns Unsupported(word).
-// Compressed (C) instructions are expanded to 32-bit before reaching here (TODO).
+fn imm_i(word : Int) -> Int {
+  word >> 20
+}
+
+///|
+fn imm_s(word : Int) -> Int {
+  let raw = (((word >> 25) & 0x7F) << 5) | ((word >> 7) & 0x1F)
+  sign_extend(raw, 12)
+}
+
+///|
+fn imm_b(word : Int) -> Int {
+  let b12 = (word >> 31) & 1
+  let b11 = (word >> 7) & 1
+  let b10_5 = (word >> 25) & 0x3F
+  let b4_1 = (word >> 8) & 0xF
+  let raw = (b12 << 12) | (b11 << 11) | (b10_5 << 5) | (b4_1 << 1)
+  sign_extend(raw, 13)
+}
+
+///|
+fn imm_j(word : Int) -> Int {
+  let b20 = (word >> 31) & 1
+  let b10_1 = (word >> 21) & 0x3FF
+  let b11 = (word >> 20) & 1
+  let b19_12 = (word >> 12) & 0xFF
+  let raw = (b20 << 20) | (b19_12 << 12) | (b11 << 11) | (b10_1 << 1)
+  sign_extend(raw, 21)
+}
+
+///|
+// Decode one 32-bit RV32 instruction word (full RV32I + Zicsr + MRET + FENCE).
 pub fn decode(word : Int) -> Instr {
   let opcode = word & 0x7F
   let rd = (word >> 7) & 0x1F
@@ -35,25 +72,32 @@ pub fn decode(word : Int) -> Instr {
   match opcode {
     0x37 => Instr::Lui(rd, word & (-4096))
     0x17 => Instr::Auipc(rd, word & (-4096))
+    0x6F => Instr::Jal(rd, imm_j(word))
+    0x67 => Instr::Jalr(rd, rs1, imm_i(word))
+    0x63 => Instr::Branch(funct3, rs1, rs2, imm_b(word))
+    0x03 => Instr::Load(funct3, rd, rs1, imm_i(word))
+    0x23 => Instr::Store(funct3, rs1, rs2, imm_s(word))
     0x13 =>
-      match funct3 {
-        0x0 => Instr::Addi(rd, rs1, word >> 20)
-        _ => Instr::Unsupported(word)
+      if funct3 == 1 || funct3 == 5 {
+        // SLLI / SRLI / SRAI: imm field is the shift amount, funct7 selects SRA.
+        Instr::OpImm(funct3, rd, rs1, (word >> 20) & 0x1F, funct7)
+      } else {
+        Instr::OpImm(funct3, rd, rs1, imm_i(word), 0)
       }
-    0x33 =>
-      match (funct3, funct7) {
-        (0x0, 0x00) => Instr::Add(rd, rs1, rs2)
-        (0x0, 0x20) => Instr::Sub(rd, rs1, rs2)
-        _ => Instr::Unsupported(word)
-      }
+    0x33 => Instr::Op(funct3, rd, rs1, rs2, funct7)
     0x73 =>
       if word == 0x00000073 {
         Instr::Ecall
       } else if word == 0x00100073 {
         Instr::Ebreak
+      } else if word == 0x30200073 {
+        Instr::Mret
+      } else if funct3 != 0 {
+        Instr::Csr(funct3, rd, (word >> 20) & 0xFFF, rs1)
       } else {
         Instr::Unsupported(word)
       }
+    0x0F => Instr::Fence
     _ => Instr::Unsupported(word)
   }
 }

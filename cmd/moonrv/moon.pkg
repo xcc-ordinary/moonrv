@@ -2,6 +2,7 @@ import {
   "moonbitlang/core/env",
   "xcc-ordinary/moonrv/exec",
   "xcc-ordinary/moonrv/memory",
+  "xcc-ordinary/moonrv/suite",
 }
 
 pkgtype(kind: "executable")

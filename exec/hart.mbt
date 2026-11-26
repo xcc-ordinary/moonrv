@@ -2,29 +2,112 @@
 #derive(Debug, Eq)
 pub(all) enum StepResult {
   Ok
-  Ecall
-  Ebreak
+  Halted
   Unsupported(Int)
 }
 
 ///|
-// One hardware thread: register file + guest memory + program counter.
-// CSR file, trap handling and the full execute loop are week-1/2 work.
+// One hardware thread: register file + guest memory + CSR file + program
+// counter, plus the user-mode run state (halt/pass/exit code and captured
+// stdout). `tohost` is the riscv-tests pass/fail mailbox address (-1 when the
+// loaded ELF has no such symbol, e.g. a freestanding hello-world).
 pub struct Hart {
   regs : @machine.RegFile
   mem : @memory.Memory
+  csrs : @machine.CsrFile
   mut pc : Int
+  tohost : Int
+  mut halted : Bool
+  mut pass : Bool
+  mut fail_code : Int
+  mut exit_code : Int
+  mut bad_word : Int
+  mut steps : Int
+  stdout : Array[Int]
 }
 
 ///|
 pub fn Hart::new(mem : @memory.Memory) -> Hart {
-  { regs: @machine.RegFile::new(), mem: mem, pc: 0 }
+  Hart::new_at(mem, 0, -1)
 }
 
 ///|
-// Execute one instruction at pc. Walking skeleton implements LUI/AUIPC/ADDI/
-// ADD/SUB and reports ECALL/EBREAK; all other encodings are Unsupported.
-// TODO(week1): full RV32I, branches/jumps/loads/stores, then M and C.
+pub fn Hart::new_at(mem : @memory.Memory, entry : Int, tohost : Int) -> Hart {
+  {
+    regs: @machine.RegFile::new(),
+    mem,
+    csrs: @machine.CsrFile::new(),
+    pc: entry,
+    tohost,
+    halted: false,
+    pass: false,
+    fail_code: 0,
+    exit_code: 0,
+    bad_word: 0,
+    steps: 0,
+    stdout: [],
+  }
+}
+
+///|
+// Unsigned less-than on 32-bit Ints: flipping the sign bit maps unsigned order
+// onto signed order.
+fn ult(a : Int, b : Int) -> Bool {
+  let min_int = -2147483647 - 1
+  (a ^ min_int) < (b ^ min_int)
+}
+
+///|
+// Logical right shift of a 32-bit value by n (0..31).
+fn srl32(a : Int, n : Int) -> Int {
+  if n == 0 {
+    a
+  } else {
+    (a >> n) & ((1 << (32 - n)) - 1)
+  }
+}
+
+///|
+// Linux user-mode syscalls used by the milestone programs: write(64),
+// exit(93), read(63, returns EOF). Unknown numbers return -ENOSYS in a0.
+fn Hart::ecall(self : Hart) -> StepResult {
+  let num = self.regs.get(17)
+  let a0 = self.regs.get(10)
+  match num {
+    93 => {
+      self.exit_code = a0
+      self.pass = a0 == 0
+      if a0 != 0 {
+        self.fail_code = a0
+      }
+      self.halted = true
+      StepResult::Halted
+    }
+    64 => {
+      let buf = self.regs.get(11)
+      let len = self.regs.get(12)
+      for i = 0; i < len; i = i + 1 {
+        self.stdout.push(self.mem.read_u8(buf + i))
+      }
+      self.regs.set(10, len)
+      self.pc = self.pc + 4
+      StepResult::Ok
+    }
+    63 => {
+      self.regs.set(10, 0)
+      self.pc = self.pc + 4
+      StepResult::Ok
+    }
+    _ => {
+      self.regs.set(10, -1)
+      self.pc = self.pc + 4
+      StepResult::Ok
+    }
+  }
+}
+
+///|
+// Execute one instruction at pc. Full RV32I + Zicsr + MRET + FENCE.
 pub fn Hart::step(self : Hart) -> StepResult {
   let word = self.mem.read_u32(self.pc)
   match @isa.decode(word) {
@@ -38,23 +121,211 @@ pub fn Hart::step(self : Hart) -> StepResult {
       self.pc = self.pc + 4
       StepResult::Ok
     }
-    @isa.Instr::Addi(rd, rs1, imm) => {
-      self.regs.set(rd, self.regs.get(rs1) + imm)
+    @isa.Instr::Jal(rd, imm) => {
+      self.regs.set(rd, self.pc + 4)
+      self.pc = self.pc + imm
+      StepResult::Ok
+    }
+    @isa.Instr::Jalr(rd, rs1, imm) => {
+      let target = (self.regs.get(rs1) + imm) & (-2)
+      self.regs.set(rd, self.pc + 4)
+      self.pc = target
+      StepResult::Ok
+    }
+    @isa.Instr::Branch(f3, rs1, rs2, imm) => {
+      let a = self.regs.get(rs1)
+      let b = self.regs.get(rs2)
+      let taken = match f3 {
+        0 => a == b
+        1 => a != b
+        4 => a < b
+        5 => a >= b
+        6 => ult(a, b)
+        7 => !ult(a, b)
+        _ => false
+      }
+      if taken {
+        self.pc = self.pc + imm
+      } else {
+        self.pc = self.pc + 4
+      }
+      StepResult::Ok
+    }
+    @isa.Instr::Load(f3, rd, rs1, imm) => {
+      let addr = self.regs.get(rs1) + imm
+      let value = match f3 {
+        0 => @isa.sign_extend(self.mem.read_u8(addr), 8)
+        1 => @isa.sign_extend(self.mem.read_u16(addr), 16)
+        2 => self.mem.read_u32(addr)
+        4 => self.mem.read_u8(addr)
+        5 => self.mem.read_u16(addr)
+        _ => 0
+      }
+      self.regs.set(rd, value)
       self.pc = self.pc + 4
       StepResult::Ok
     }
-    @isa.Instr::Add(rd, rs1, rs2) => {
-      self.regs.set(rd, self.regs.get(rs1) + self.regs.get(rs2))
+    @isa.Instr::Store(f3, rs1, rs2, imm) => {
+      let addr = self.regs.get(rs1) + imm
+      let value = self.regs.get(rs2)
+      match f3 {
+        0 => self.mem.write_u8(addr, value)
+        1 => self.mem.write_u16(addr, value)
+        2 => self.mem.write_u32(addr, value)
+        _ => ()
+      }
+      self.pc = self.pc + 4
+      if self.tohost >= 0 && addr == self.tohost {
+        self.pass = value == 1
+        if value != 1 {
+          self.fail_code = value
+        }
+        self.halted = true
+        StepResult::Halted
+      } else {
+        StepResult::Ok
+      }
+    }
+    @isa.Instr::OpImm(f3, rd, rs1, imm, f7) => {
+      let a = self.regs.get(rs1)
+      let value = match f3 {
+        0 => a + imm
+        2 => if a < imm {
+          1
+        } else {
+          0
+        }
+        3 => if ult(a, imm) {
+          1
+        } else {
+          0
+        }
+        4 => a ^ imm
+        6 => a | imm
+        7 => a & imm
+        1 => a << (imm & 31)
+        5 =>
+          if f7 == 0x20 {
+            a >> (imm & 31)
+          } else {
+            srl32(a, imm & 31)
+          }
+        _ => 0
+      }
+      self.regs.set(rd, value)
       self.pc = self.pc + 4
       StepResult::Ok
     }
-    @isa.Instr::Sub(rd, rs1, rs2) => {
-      self.regs.set(rd, self.regs.get(rs1) - self.regs.get(rs2))
+    @isa.Instr::Op(f3, rd, rs1, rs2, f7) => {
+      if f7 == 1 {
+        // M extension (MUL/DIV/REM) is week-2 work.
+        StepResult::Unsupported(word)
+      } else {
+        let a = self.regs.get(rs1)
+        let b = self.regs.get(rs2)
+        let value = match f3 {
+          0 => if f7 == 0x20 {
+            a - b
+          } else {
+            a + b
+          }
+          1 => a << (b & 31)
+          2 => if a < b {
+            1
+          } else {
+            0
+          }
+          3 => if ult(a, b) {
+            1
+          } else {
+            0
+          }
+          4 => a ^ b
+          5 => if f7 == 0x20 {
+            a >> (b & 31)
+          } else {
+            srl32(a, b & 31)
+          }
+          6 => a | b
+          7 => a & b
+          _ => 0
+        }
+        self.regs.set(rd, value)
+        self.pc = self.pc + 4
+        StepResult::Ok
+      }
+    }
+    @isa.Instr::Csr(f3, rd, csr, rs1) => {
+      let old = self.csrs.get(csr)
+      let mut src = self.regs.get(rs1)
+      if f3 >= 5 {
+        src = rs1
+      }
+      match f3 {
+        1 => self.csrs.set(csr, src)
+        2 =>
+          if rs1 != 0 {
+            self.csrs.set(csr, old | src)
+          }
+        3 =>
+          if rs1 != 0 {
+            self.csrs.set(csr, old & (src ^ (-1)))
+          }
+        5 => self.csrs.set(csr, src)
+        6 =>
+          if rs1 != 0 {
+            self.csrs.set(csr, old | src)
+          }
+        7 =>
+          if rs1 != 0 {
+            self.csrs.set(csr, old & (src ^ (-1)))
+          }
+        _ => ()
+      }
+      self.regs.set(rd, old)
       self.pc = self.pc + 4
       StepResult::Ok
     }
-    @isa.Instr::Ecall => StepResult::Ecall
-    @isa.Instr::Ebreak => StepResult::Ebreak
+    @isa.Instr::Ecall => self.ecall()
+    @isa.Instr::Ebreak => {
+      self.halted = true
+      StepResult::Halted
+    }
+    @isa.Instr::Mret => {
+      self.pc = self.csrs.get(0x341) // mepc
+      StepResult::Ok
+    }
+    @isa.Instr::Fence => {
+      self.pc = self.pc + 4
+      StepResult::Ok
+    }
     @isa.Instr::Unsupported(w) => StepResult::Unsupported(w)
   }
+}
+
+///|
+// Run until halt (ecall exit / tohost write / ebreak), an unsupported encoding,
+// or the step budget is exhausted. Returns true on a clean pass.
+pub fn Hart::run(self : Hart, max_steps : Int) -> Bool {
+  while !self.halted && self.steps < max_steps {
+    match self.step() {
+      StepResult::Ok => self.steps = self.steps + 1
+      StepResult::Halted => self.steps = self.steps + 1
+      StepResult::Unsupported(w) => {
+        self.bad_word = w
+        self.pass = false
+        self.halted = true
+      }
+    }
+  }
+  self.pass
+}
+
+///|
+pub fn Hart::stdout_string(self : Hart) -> String {
+  let sb = StringBuilder()
+  for b in self.stdout {
+    sb.write_char(Int::unsafe_to_char(b))
+  }
+  sb.to_string()
 }

@@ -1,0 +1,4 @@
+import {
+  "xcc-ordinary/moonrv/elf",
+  "xcc-ordinary/moonrv/exec",
+}
