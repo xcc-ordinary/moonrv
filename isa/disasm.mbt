@@ -182,6 +182,27 @@ pub fn disasm(word : Int, pc : Int) -> String {
       }
       "\{mn} \{regname(rd)}, \{regname(rs1)}, \{regname(rs2)}"
     }
+    Instr::Atomic(f5, f3, rd, rs1, rs2) => {
+      let w = if f3 == 2 { "w" } else { "d" }
+      if f5 == 0x02 {
+        "lr.\{w} \{regname(rd)}, (\{regname(rs1)})"
+      } else if f5 == 0x03 {
+        "sc.\{w} \{regname(rd)}, \{regname(rs2)}, (\{regname(rs1)})"
+      } else {
+        let op = match f5 {
+          0x01 => "amoswap"
+          0x00 => "amoadd"
+          0x04 => "amoxor"
+          0x0C => "amoand"
+          0x08 => "amoor"
+          0x10 => "amomin"
+          0x14 => "amomax"
+          0x18 => "amominu"
+          _ => "amomaxu"
+        }
+        "\{op}.\{w} \{regname(rd)}, \{regname(rs2)}, (\{regname(rs1)})"
+      }
+    }
     Instr::Csr(f3, rd, csr, rs1) => {
       let mn = match f3 {
         1 => "csrrw"

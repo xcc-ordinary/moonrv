@@ -24,6 +24,7 @@ pub struct Hart {
   mut bad_word : Int
   mut steps : Int
   mut brk : Int
+  mut reservation : Int // LR/SC reservation address (-1 = none)
   stdout : Array[Int]
 }
 
@@ -47,6 +48,7 @@ pub fn Hart::new_at(mem : @memory.Memory, entry : Int, tohost : Int) -> Hart {
     bad_word: 0,
     steps: 0,
     brk: 0,
+    reservation: -1,
     stdout: [],
   }
 }
@@ -271,6 +273,9 @@ pub fn Hart::step(self : Hart) -> StepResult {
         _ => ()
       }
       self.pc = self.pc + ilen
+      if addr == self.reservation {
+        self.reservation = -1
+      }
       if self.tohost >= 0 && addr == self.tohost {
         self.pass = value == 1
         if value != 1 {
@@ -387,6 +392,48 @@ pub fn Hart::step(self : Hart) -> StepResult {
           _ => 0
         }
         self.regs.set(rd, value)
+        self.pc = self.pc + ilen
+        StepResult::Ok
+      }
+    }
+    @isa.Instr::Atomic(f5, f3, rd, rs1, rs2) => {
+      // A extension (RV32: W width only). Single hart => LR/SC reservation is
+      // tracked by address; any plain store to it invalidates the reservation.
+      if f3 != 2 {
+        StepResult::Unsupported(0)
+      } else {
+        let addr = self.regs.get(rs1)
+        let b = self.regs.get(rs2)
+        if f5 == 0x02 {
+          // LR.W
+          self.regs.set(rd, self.mem.read_u32(addr))
+          self.reservation = addr
+        } else if f5 == 0x03 {
+          // SC.W
+          if self.reservation == addr {
+            self.mem.write_u32(addr, b)
+            self.regs.set(rd, 0)
+            self.reservation = -1
+          } else {
+            self.regs.set(rd, 1)
+          }
+        } else {
+          let old = self.mem.read_u32(addr)
+          let new = match f5 {
+            0x01 => b // AMOSWAP
+            0x00 => old + b // AMOADD
+            0x04 => old ^ b // AMOXOR
+            0x0C => old & b // AMOAND
+            0x08 => old | b // AMOOR
+            0x10 => if old < b { old } else { b } // AMOMIN
+            0x14 => if old > b { old } else { b } // AMOMAX
+            0x18 => if ult(old, b) { old } else { b } // AMOMINU
+            0x1C => if ult(old, b) { b } else { old } // AMOMAXU
+            _ => old
+          }
+          self.mem.write_u32(addr, new)
+          self.regs.set(rd, old)
+        }
         self.pc = self.pc + ilen
         StepResult::Ok
       }

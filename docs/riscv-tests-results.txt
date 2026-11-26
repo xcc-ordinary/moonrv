@@ -1,3 +1,13 @@
+PASS rv32ua-p-amoadd_w
+PASS rv32ua-p-amoand_w
+PASS rv32ua-p-amomax_w
+PASS rv32ua-p-amomaxu_w
+PASS rv32ua-p-amomin_w
+PASS rv32ua-p-amominu_w
+PASS rv32ua-p-amoor_w
+PASS rv32ua-p-amoswap_w
+PASS rv32ua-p-amoxor_w
+PASS rv32ua-p-lrsc
 PASS rv32uc-p-rvc
 PASS rv32ui-p-add
 PASS rv32ui-p-addi
@@ -49,6 +59,25 @@ PASS rv32um-p-mulhsu
 PASS rv32um-p-mulhu
 PASS rv32um-p-rem
 PASS rv32um-p-remu
+PASS rv64ua-p-amoadd_d
+PASS rv64ua-p-amoadd_w
+PASS rv64ua-p-amoand_d
+PASS rv64ua-p-amoand_w
+PASS rv64ua-p-amomax_d
+PASS rv64ua-p-amomax_w
+PASS rv64ua-p-amomaxu_d
+PASS rv64ua-p-amomaxu_w
+PASS rv64ua-p-amomin_d
+PASS rv64ua-p-amomin_w
+PASS rv64ua-p-amominu_d
+PASS rv64ua-p-amominu_w
+PASS rv64ua-p-amoor_d
+PASS rv64ua-p-amoor_w
+PASS rv64ua-p-amoswap_d
+PASS rv64ua-p-amoswap_w
+PASS rv64ua-p-amoxor_d
+PASS rv64ua-p-amoxor_w
+PASS rv64ua-p-lrsc
 PASS rv64ui-p-add
 PASS rv64ui-p-addi
 PASS rv64ui-p-addiw
@@ -117,4 +146,4 @@ PASS rv64um-p-remu
 PASS rv64um-p-remuw
 PASS rv64um-p-remw
 ----
-rv32ui-p: 118/118 passed
+riscv-tests: 147/147 passed

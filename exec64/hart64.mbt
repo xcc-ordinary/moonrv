@@ -23,6 +23,7 @@ pub struct Hart64 {
   mut exit_code : Int64
   mut bad_word : Int
   mut steps : Int
+  mut reservation : Int64 // LR/SC reservation address (-1 = none)
   stdout : Array[Int]
 }
 
@@ -40,6 +41,7 @@ pub fn Hart64::new_at(mem : @memory.Memory, entry : Int, tohost : Int) -> Hart64
     exit_code: 0L,
     bad_word: 0,
     steps: 0,
+    reservation: -1L,
     stdout: [],
   }
 }
@@ -250,6 +252,9 @@ pub fn Hart64::step(self : Hart64) -> StepResult64 {
         _ => ()
       }
       self.pc = self.pc + ilen64
+      if addr64 == self.reservation {
+        self.reservation = -1L
+      }
       if self.tohost >= 0L && addr64 == self.tohost {
         self.pass = value == 1L
         if value != 1L {
@@ -436,6 +441,74 @@ pub fn Hart64::step(self : Hart64) -> StepResult64 {
         }
       }
       self.set(rd, value)
+      self.pc = self.pc + ilen64
+      StepResult64::Ok
+    }
+    @isa.Instr::Atomic(f5, f3, rd, rs1, rs2) => {
+      // A extension: W (32-bit, sign-extended) and D (64-bit) widths.
+      let addr64 = self.get(rs1)
+      let addr = addr64.to_int()
+      let b = self.get(rs2)
+      if f3 == 2 {
+        let old = self.mem.read_u32(addr)
+        let b32 = b.to_int()
+        if f5 == 0x02 {
+          self.set(rd, sext32(old.to_int64()))
+          self.reservation = addr64
+        } else if f5 == 0x03 {
+          if self.reservation == addr64 {
+            self.mem.write_u32(addr, b32)
+            self.set(rd, 0L)
+            self.reservation = -1L
+          } else {
+            self.set(rd, 1L)
+          }
+        } else {
+          let new = match f5 {
+            0x01 => b32
+            0x00 => old + b32
+            0x04 => old ^ b32
+            0x0C => old & b32
+            0x08 => old | b32
+            0x10 => if old < b32 { old } else { b32 }
+            0x14 => if old > b32 { old } else { b32 }
+            0x18 => if ult64(old.to_int64() & 0xFFFFFFFFL, b & 0xFFFFFFFFL) { old } else { b32 }
+            0x1C => if ult64(old.to_int64() & 0xFFFFFFFFL, b & 0xFFFFFFFFL) { b32 } else { old }
+            _ => old
+          }
+          self.mem.write_u32(addr, new)
+          self.set(rd, sext32(old.to_int64()))
+        }
+      } else if f3 == 3 {
+        let old = self.mem.read_u64(addr)
+        if f5 == 0x02 {
+          self.set(rd, old)
+          self.reservation = addr64
+        } else if f5 == 0x03 {
+          if self.reservation == addr64 {
+            self.mem.write_u64(addr, b)
+            self.set(rd, 0L)
+            self.reservation = -1L
+          } else {
+            self.set(rd, 1L)
+          }
+        } else {
+          let new = match f5 {
+            0x01 => b
+            0x00 => old + b
+            0x04 => old ^ b
+            0x0C => old & b
+            0x08 => old | b
+            0x10 => if old < b { old } else { b }
+            0x14 => if old > b { old } else { b }
+            0x18 => if ult64(old, b) { old } else { b }
+            0x1C => if ult64(old, b) { b } else { old }
+            _ => old
+          }
+          self.mem.write_u64(addr, new)
+          self.set(rd, old)
+        }
+      }
       self.pc = self.pc + ilen64
       StepResult64::Ok
     }

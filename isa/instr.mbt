@@ -16,6 +16,7 @@ pub(all) enum Instr {
   Op(Int, Int, Int, Int, Int) // funct3, rd, rs1, rs2, funct7
   OpImm32(Int, Int, Int, Int, Int) // RV64 *W: funct3, rd, rs1, imm/shamt, funct7
   Op32(Int, Int, Int, Int, Int) // RV64 *W: funct3, rd, rs1, rs2, funct7
+  Atomic(Int, Int, Int, Int, Int) // A: funct5, funct3(width), rd, rs1, rs2
   Csr(Int, Int, Int, Int) // funct3, rd, csr, rs1 (or zimm)
   Ecall
   Ebreak
@@ -95,6 +96,14 @@ pub fn decode(word : Int) -> Instr {
         Instr::OpImm32(funct3, rd, rs1, imm_i(word), 0)
       }
     0x3B => Instr::Op32(funct3, rd, rs1, rs2, funct7)
+    0x2F =>
+      // A extension: AMO / LR / SC. funct5 = word[31:27]; aq/rl (word[26:25])
+      // are ordering hints, irrelevant for a single hart.
+      if funct3 == 2 || funct3 == 3 {
+        Instr::Atomic((word >> 27) & 0x1F, funct3, rd, rs1, rs2)
+      } else {
+        Instr::Unsupported(word)
+      }
     0x73 =>
       if word == 0x00000073 {
         Instr::Ecall
