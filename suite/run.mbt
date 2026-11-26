@@ -90,3 +90,52 @@ pub fn lookup(name : String) -> Array[Int]? {
   }
   None
 }
+
+///|
+fn pc_hex(pc : Int) -> String {
+  @isa.to_hex(pc.to_int64() & 0xFFFFFFFFL)
+}
+
+///|
+// Single-step trace of an RV32 image: one line per executed instruction.
+pub fn trace_data(data : Array[Int], max_steps : Int) -> Array[String] {
+  let lines = []
+  match @elf.load(data) {
+    Some(e) => {
+      let h = @exec.Hart::new_at(e.mem, e.entry, e.tohost)
+      let mut n = 0
+      while !h.halted && n < max_steps {
+        let pc = h.pc
+        lines.push("0x\{pc_hex(pc)}: \{@isa.disasm(e.mem.read_u32(pc), pc)}")
+        match h.step() {
+          @exec.StepResult::Ok => ()
+          @exec.StepResult::Halted => ()
+          @exec.StepResult::Unsupported(_) => {
+            lines.push("  (unsupported encoding)")
+            break
+          }
+        }
+        n = n + 1
+      }
+    }
+    None => lines.push("invalid ELF image")
+  }
+  lines
+}
+
+///|
+// Disassemble `count` words starting at the entry point of an RV32 image.
+pub fn disasm_data(data : Array[Int], count : Int) -> Array[String] {
+  let lines = []
+  match @elf.load(data) {
+    Some(e) => {
+      let mut pc = e.entry
+      for i = 0; i < count; i = i + 1 {
+        lines.push("0x\{pc_hex(pc)}: \{@isa.disasm(e.mem.read_u32(pc), pc)}")
+        pc = pc + 4
+      }
+    }
+    None => lines.push("invalid ELF image")
+  }
+  lines
+}

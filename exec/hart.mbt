@@ -23,6 +23,7 @@ pub struct Hart {
   mut exit_code : Int
   mut bad_word : Int
   mut steps : Int
+  mut brk : Int
   stdout : Array[Int]
 }
 
@@ -45,6 +46,7 @@ pub fn Hart::new_at(mem : @memory.Memory, entry : Int, tohost : Int) -> Hart {
     exit_code: 0,
     bad_word: 0,
     steps: 0,
+    brk: 0,
     stdout: [],
   }
 }
@@ -120,7 +122,7 @@ fn Hart::ecall(self : Hart) -> StepResult {
   let a0 = self.regs.get(10)
   let next = self.pc + 4
   match num {
-    93 => {
+    93 | 94 => {
       self.exit_code = a0
       self.pass = a0 == 0
       if a0 != 0 {
@@ -141,6 +143,47 @@ fn Hart::ecall(self : Hart) -> StepResult {
     }
     63 => {
       self.regs.set(10, 0)
+      self.pc = next
+      StepResult::Ok
+    }
+    66 => {
+      // writev(fd, iov, iovcnt): gather buffers into stdout.
+      let iov = self.regs.get(11)
+      let cnt = self.regs.get(12)
+      let mut total = 0
+      for k = 0; k < cnt; k = k + 1 {
+        let base = self.mem.read_u32(iov + k * 8)
+        let len = self.mem.read_u32(iov + k * 8 + 4)
+        for i = 0; i < len; i = i + 1 {
+          self.stdout.push(self.mem.read_u8(base + i))
+        }
+        total = total + len
+      }
+      self.regs.set(10, total)
+      self.pc = next
+      StepResult::Ok
+    }
+    169 => {
+      // gettimeofday(tv, tz): report a fixed epoch (deterministic runs).
+      let tv = self.regs.get(10)
+      if tv != 0 {
+        self.mem.write_u32(tv, 0)
+        self.mem.write_u32(tv + 4, 0)
+      }
+      self.regs.set(10, 0)
+      self.pc = next
+      StepResult::Ok
+    }
+    214 => {
+      // brk(addr): simple program-break within the loaded window.
+      let req = self.regs.get(10)
+      if self.brk == 0 {
+        self.brk = self.mem.base + 0x8000
+      }
+      if req != 0 {
+        self.brk = req
+      }
+      self.regs.set(10, self.brk)
       self.pc = next
       StepResult::Ok
     }

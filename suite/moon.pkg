@@ -2,4 +2,5 @@ import {
   "xcc-ordinary/moonrv/elf",
   "xcc-ordinary/moonrv/exec",
   "xcc-ordinary/moonrv/exec64",
+  "xcc-ordinary/moonrv/isa",
 }

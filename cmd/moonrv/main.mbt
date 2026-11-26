@@ -17,6 +17,26 @@ fn main {
         } else {
           println("usage: moonrv run <name>   (see: moonrv list)")
         }
+      "trace" =>
+        if args.length() >= 3 {
+          let mut max = 60
+          if args.length() >= 4 {
+            max = parse_int(args[3], 60)
+          }
+          trace_image(args[2], max)
+        } else {
+          println("usage: moonrv trace <name> [max]")
+        }
+      "disasm" =>
+        if args.length() >= 3 {
+          let mut count = 30
+          if args.length() >= 4 {
+            count = parse_int(args[3], 30)
+          }
+          disasm_image(args[2], count)
+        } else {
+          println("usage: moonrv disasm <name> [count]")
+        }
       _ => print_usage()
     }
   } else {
@@ -29,10 +49,53 @@ fn print_usage() -> Unit {
   println("moonrv - pure-MoonBit RISC-V user-mode ISA simulator")
   println("")
   println("usage:")
-  println("  moonrv suite          Run the official riscv-tests rv32ui-p suite")
+  println("  moonrv suite          Run the official riscv-tests suite (118 tests)")
   println("  moonrv run <name>     Run one embedded ELF (e.g. hello, rv32ui-p-add)")
+  println("  moonrv trace <name> [max]   Single-step trace an RV32 image")
+  println("  moonrv disasm <name> [n]    Disassemble an RV32 image")
   println("  moonrv list           List embedded ELF images")
   println("  moonrv demo           Run the walking-skeleton RV32I demo")
+}
+
+///|
+fn parse_int(s : String, default : Int) -> Int {
+  let mut n = 0
+  let mut any = false
+  for c in s {
+    if c >= '0' && c <= '9' {
+      n = n * 10 + (c.to_int() - 48)
+      any = true
+    } else {
+      return default
+    }
+  }
+  if any {
+    n
+  } else {
+    default
+  }
+}
+
+///|
+fn trace_image(name : String, max : Int) -> Unit {
+  match @suite.lookup(name) {
+    Some(data) =>
+      for line in @suite.trace_data(data, max) {
+        println(line)
+      }
+    None => println("unknown image: \{name}   (see: moonrv list)")
+  }
+}
+
+///|
+fn disasm_image(name : String, count : Int) -> Unit {
+  match @suite.lookup(name) {
+    Some(data) =>
+      for line in @suite.disasm_data(data, count) {
+        println(line)
+      }
+    None => println("unknown image: \{name}   (see: moonrv list)")
+  }
 }
 
 ///|
