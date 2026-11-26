@@ -24,6 +24,7 @@ pub struct Hart {
   mut bad_word : Int
   mut steps : Int
   mut brk : Int
+  mut mmap_next : Int // anonymous mmap bump pointer (0 = uninitialised)
   mut reservation : Int // LR/SC reservation address (-1 = none)
   stdout : Array[Int]
 }
@@ -35,7 +36,7 @@ pub fn Hart::new(mem : @memory.Memory) -> Hart {
 
 ///|
 pub fn Hart::new_at(mem : @memory.Memory, entry : Int, tohost : Int) -> Hart {
-  {
+  let h = {
     regs: @machine.RegFile::new(),
     mem,
     csrs: @machine.CsrFile::new(),
@@ -48,9 +49,14 @@ pub fn Hart::new_at(mem : @memory.Memory, entry : Int, tohost : Int) -> Hart {
     bad_word: 0,
     steps: 0,
     brk: 0,
+    mmap_next: 0,
     reservation: -1,
     stdout: [],
   }
+  // Provide a valid stack for freestanding programs (the p-environment tests
+  // set their own sp during init, so this is harmless for them).
+  h.regs.set(2, mem.top() - 16)
+  h
 }
 
 ///|
@@ -186,6 +192,31 @@ fn Hart::ecall(self : Hart) -> StepResult {
         self.brk = req
       }
       self.regs.set(10, self.brk)
+      self.pc = next
+      StepResult::Ok
+    }
+    222 => {
+      // mmap(addr, len, prot, flags, fd, off): anonymous bump allocation within
+      // the guest memory window. prot / flags are accepted but ignored.
+      let len = self.regs.get(11)
+      if self.mmap_next == 0 {
+        self.mmap_next = self.mem.base + 0x8000
+      }
+      let addr = self.mmap_next
+      self.mmap_next = addr + ((len + 0xFFF) & (-4096))
+      self.regs.set(10, addr)
+      self.pc = next
+      StepResult::Ok
+    }
+    215 => {
+      // munmap(addr, len): no-op for the bump allocator.
+      self.regs.set(10, 0)
+      self.pc = next
+      StepResult::Ok
+    }
+    172 => {
+      // getpid(): fixed pid for deterministic runs.
+      self.regs.set(10, 1)
       self.pc = next
       StepResult::Ok
     }

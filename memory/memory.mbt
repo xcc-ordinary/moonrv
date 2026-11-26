@@ -20,6 +20,12 @@ pub fn Memory::new_at(base : Int, size : Int) -> Memory {
 }
 
 ///|
+// One past the highest mapped guest address (top of the backing window).
+pub fn Memory::top(self : Memory) -> Int {
+  self.base + self.bytes.length()
+}
+
+///|
 pub fn Memory::read_u8(self : Memory, addr : Int) -> Int {
   let i = addr - self.base
   if i < 0 || i >= self.bytes.length() {

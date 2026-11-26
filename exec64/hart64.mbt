@@ -29,7 +29,7 @@ pub struct Hart64 {
 
 ///|
 pub fn Hart64::new_at(mem : @memory.Memory, entry : Int, tohost : Int) -> Hart64 {
-  {
+  let h = {
     regs: Array::make(32, 0L),
     mem,
     csrs: Array::make(4096, 0L),
@@ -44,6 +44,8 @@ pub fn Hart64::new_at(mem : @memory.Memory, entry : Int, tohost : Int) -> Hart64
     reservation: -1L,
     stdout: [],
   }
+  h.regs[2] = (mem.top() - 16).to_int64()
+  h
 }
 
 ///|
