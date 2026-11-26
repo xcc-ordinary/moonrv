@@ -4,13 +4,13 @@ Pure-MoonBit **RISC-V user-mode ISA simulator** (RV32IMC / RV64IMC) with Linux
 syscall emulation — the missing *execution/verification* layer for MoonBit's
 growing RISC-V *code-generation* ecosystem.
 
-> Status: **week-1 milestone reached — rv32ui green.** The full RV32I base ISA
-> + Zicsr + MRET executes the official **riscv-tests `rv32ui-p` suite: 42/42
-> pass**, and a real `hello-world` ELF runs to completion (`write` + `exit`
-> syscalls). 14 tests green on `wasm` and `wasm-gc`. See the committed matrix
-> [`docs/rv32ui-p-results.txt`](docs/rv32ui-p-results.txt). M / C / RV64 and the
-> wider syscall set are the next steps
-> ([`docs/week1-rv32ui-checklist.md`](docs/week1-rv32ui-checklist.md)).
+> Status: **RV32IMC + RV64IM implemented — official compliance 118/118 green.**
+> The simulator executes the full official **riscv-tests** user-mode matrix:
+> `rv32ui-p` 42/42, `rv32um-p` 8/8, `rv32uc-p` 1/1, `rv64ui-p` 54/54,
+> `rv64um-p` 13/13, plus a real `hello-world` ELF. **17 tests green** on `wasm`
+> and `wasm-gc`, including a **60-case differential corpus checked against
+> `qemu-riscv32`**. See [`docs/riscv-tests-results.txt`](docs/riscv-tests-results.txt).
+> CLI: `suite | run | trace | disasm | list | demo`.
 
 ## Why this project
 
@@ -48,26 +48,27 @@ S-mode / Sv32 / Sv39 MMU / page tables / virtio / booting xv6 or Linux
 
 | Package    | Responsibility                                            |
 | ---------- | --------------------------------------------------------- |
-| `isa`      | instruction vocabulary + decoder (full RV32I + Zicsr), sign extension |
+| `isa`      | instruction vocabulary + decoder (RV32I + Zicsr + RV64 `*W`), RVC expander (`rvc.mbt`), disassembler (`disasm.mbt`) |
 | `machine`  | register file (x0 hardwired zero) + minimal CSR file       |
-| `memory`   | flat little-endian base-relative guest memory             |
-| `elf`      | ELF32 loader: PT_LOAD mapping + `tohost` symbol lookup    |
-| `exec`     | hart step / run loop, Linux syscalls (write/exit/read), tohost pass/fail |
-| `suite`    | embedded riscv-tests rv32ui-p ELFs + hello-world, runner  |
-| `cmd/moonrv` | CLI: `suite` / `run` / `list` / `demo`                  |
-
-Planned packages: `syscall` (wider Linux ABI), `disasm`, `diff` (oracle).
+| `memory`   | flat little-endian base-relative guest memory (u8/u16/u32/u64) |
+| `elf`      | ELF32 (`elf.mbt`) + ELF64 (`elf64.mbt`) loaders: PT_LOAD mapping + `tohost` lookup |
+| `exec`     | RV32 hart step / run loop, Linux syscalls, tohost pass/fail |
+| `exec64`   | RV64 hart (Int64) sharing the `isa` decoder; RV64M high-multiply / long-division |
+| `suite`    | embedded riscv-tests ELFs (hex) + hello-world, runner, trace/disasm, QEMU differential corpus |
+| `cmd/moonrv` | CLI: `suite` / `run` / `trace` / `disasm` / `list` / `demo` |
+| `scripts`  | `gen_diff.py` — seeded random-program generator checked against QEMU |
 
 ## Quickstart
 
 ```bash
 moon update
-moon test --target wasm        # 14 tests, incl. rv32ui-p 42/42 + hello-world
+moon test --target wasm        # 17 tests: 118/118 compliance + hello + 60-case QEMU diff
 moon test --target wasm-gc
-moon run cmd/moonrv --target wasm -- suite        # rv32ui-p: 42/42 passed
-moon run cmd/moonrv --target wasm -- run hello    # Hello, moonrv!  [PASS]
-moon run cmd/moonrv --target wasm -- run rv32ui-p-add
-moon run cmd/moonrv --target wasm -- demo         # x1=5 x2=10
+moon run cmd/moonrv --target wasm -- suite          # riscv-tests: 118/118 passed
+moon run cmd/moonrv --target wasm -- run hello      # Hello, moonrv!  [PASS]
+moon run cmd/moonrv --target wasm -- run rv64ui-p-add
+moon run cmd/moonrv --target wasm -- trace hello 12 # single-step trace (ABI reg names)
+moon run cmd/moonrv --target wasm -- disasm rv32ui-p-add 20
 ```
 
 The official suite ELFs are vendored under [`testdata/`](testdata) (built from
@@ -78,15 +79,19 @@ or external oracle required.
 ## Verification plan
 
 1. **riscv-tests** official compliance suite → pass/fail matrix.
-   **Done: `rv32ui-p` 42/42 pass** ([`docs/rv32ui-p-results.txt`](docs/rv32ui-p-results.txt)).
-   Next: `rv32um` (M), `rv32uc` (C), then RV64. The `-v-` (virtual-memory)
-   variants are out of scope (they exercise the MMU; see `docs/scope.md`).
-2. **Differential testing** vs spike / qemu-riscv-user at syscall boundaries
-   (registers / memory / exit code), as an independent CI job.
-3. **Benchmarks**: Dhrystone / CoreMark cross-compiled to RISC-V ELF, output and
-   score compared against spike.
-4. **Fuzzing**: seeded random instruction streams, moonrv vs spike, counterexample
-   saved and reproducible by seed.
+   **Done: 118/118 pass** — `rv32ui-p` 42, `rv32um-p` 8, `rv32uc-p` 1,
+   `rv64ui-p` 54, `rv64um-p` 13
+   ([`docs/riscv-tests-results.txt`](docs/riscv-tests-results.txt)). The `-v-`
+   (virtual-memory) variants are out of scope (they exercise the MMU).
+2. **Differential testing** vs `qemu-riscv32`. **Done:** `scripts/gen_diff.py`
+   generates seeded random RV32IM user-mode programs, runs them on QEMU to obtain
+   reference exit codes, and emits a frozen corpus (`suite/diff_wbtest.mbt`)
+   replayed by `moon test`. A dedicated CI job regenerates the corpus against
+   QEMU on every run, so a semantic divergence fails the build.
+3. **Fuzzing**: the same generator is seed-reproducible; any counterexample is
+   captured as a hex ELF + expected exit code and replayed deterministically.
+4. **Benchmarks** (stretch): Dhrystone / CoreMark cross-compiled to RISC-V ELF,
+   output and score compared against spike.
 
 ## Origin & license
 

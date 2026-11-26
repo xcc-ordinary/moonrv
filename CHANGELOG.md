@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.0.4 — differential vs QEMU + trace/disasm CLI + wider syscalls
+
+- **Differential harness**: `scripts/gen_diff.py` generates seeded random RV32IM
+  user-mode programs, assembles them with the RISC-V cross toolchain, runs them on
+  `qemu-riscv32` for reference exit codes, and emits a frozen 60-case corpus
+  (`suite/diff_wbtest.mbt`) replayed by `moon test`. New CI job `differential`
+  regenerates the corpus against QEMU on every run. **17 tests green.**
+- **CLI**: `trace <name> [max]` single-step execution trace and `disasm <name>
+  [count]` disassembly, both with ABI register names (`isa/disasm.mbt`).
+- **Wider Linux syscalls**: `writev` (66), `exit_group` (94), `gettimeofday` (169),
+  `brk` (214) added to the RV32 hart.
+- Note: qemu-user requires the executable bit on the ELF; the generator sets it.
+
 ## 0.0.3 — RV64IM + full official suite green
 
 - New `exec64` package: isolated Int64 hart (RV64I + W-word ops + M), so the

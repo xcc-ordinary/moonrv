@@ -40,12 +40,31 @@ jobs:
       - name: Demo (walking skeleton)
         run: moon run cmd/moonrv --target wasm -- demo
 
-  # Future job (week 2+): differential verification vs spike / qemu-riscv-user
-  # over the vendored riscv-tests ELFs. Kept separate so compliance results are
-  # an independent, reproducible CI artifact.
-  # riscv-tests:
-  #   runs-on: ubuntu-latest
-  #   steps:
-  #     - uses: actions/checkout@v5
-  #     - run: sudo apt-get update && sudo apt-get install -y qemu-user
-  #     - run: bash scripts/run-riscv-tests.sh
+  # Differential verification: regenerate the random-program corpus against
+  # qemu-riscv32 (the reference oracle) on every run, then replay it in moonrv.
+  # A mismatch means moonrv disagrees with QEMU on RV32IM semantics.
+  differential:
+    name: Differential vs qemu-riscv32
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install QEMU + RISC-V cross toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user gcc-riscv64-unknown-elf
+
+      - name: Install MoonBit
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+
+      - name: Update registry
+        run: moon update
+
+      - name: Regenerate corpus against QEMU (seeded, reproducible)
+        run: python3 scripts/gen_diff.py suite/diff_wbtest.mbt
+
+      - name: Replay corpus in moonrv (wasm)
+        run: moon test --target wasm
