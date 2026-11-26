@@ -180,7 +180,7 @@ pub fn Hart64::step(self : Hart64) -> StepResult64 {
   let mut instr = @isa.decode(self.mem.read_u32(pci))
   if (hw & 3) != 3 {
     ilen = 2
-    instr = @isa.decode_compressed(hw)
+    instr = @isa.decode_compressed64(hw)
   }
   let ilen64 = ilen.to_int64()
   match instr {

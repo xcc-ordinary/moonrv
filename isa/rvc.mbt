@@ -164,3 +164,140 @@ pub fn decode_compressed(hw : Int) -> Instr {
     _ => Instr::Unsupported(hw)
   }
 }
+
+///|
+// RV64C offsets: C.LD / C.SD use uimm[5:3|7:6].
+fn c_ldsd_off(hw : Int) -> Int {
+  (((hw >> 10) & 7) << 3) | (((hw >> 5) & 3) << 6)
+}
+
+///|
+// RV64C stack offsets: C.LDSP uimm[5|4:3|8:6], C.SDSP uimm[5:3|8:6].
+fn c_ldsp_off(hw : Int) -> Int {
+  (((hw >> 12) & 1) << 5) | (((hw >> 5) & 3) << 3) | (((hw >> 2) & 7) << 6)
+}
+
+///|
+fn c_sdsp_off(hw : Int) -> Int {
+  (((hw >> 10) & 7) << 3) | (((hw >> 7) & 7) << 6)
+}
+
+///|
+// RV64 compressed decoder. Differs from RV32C: C.LD/C.SD/C.LDSP/C.SDSP replace
+// the floating-point slots, C.ADDIW replaces C.JAL, and C.SUBW/C.ADDW appear.
+pub fn decode_compressed64(hw : Int) -> Instr {
+  let op = hw & 3
+  let f3 = (hw >> 13) & 7
+  match op {
+    0 =>
+      match f3 {
+        0 => {
+          let rd = 8 + ((hw >> 2) & 7)
+          let imm = (((hw >> 7) & 0xF) << 6) | (((hw >> 11) & 3) << 4) |
+            (((hw >> 5) & 1) << 3) | (((hw >> 6) & 1) << 2)
+          if imm == 0 {
+            Instr::Unsupported(hw)
+          } else {
+            Instr::OpImm(0, rd, 2, imm, 0) // C.ADDI4SPN
+          }
+        }
+        2 => Instr::Load(2, 8 + ((hw >> 2) & 7), 8 + ((hw >> 7) & 7), c_lwsw_off(hw)) // C.LW
+        3 => Instr::Load(3, 8 + ((hw >> 2) & 7), 8 + ((hw >> 7) & 7), c_ldsd_off(hw)) // C.LD
+        6 => Instr::Store(2, 8 + ((hw >> 7) & 7), 8 + ((hw >> 2) & 7), c_lwsw_off(hw)) // C.SW
+        7 => Instr::Store(3, 8 + ((hw >> 7) & 7), 8 + ((hw >> 2) & 7), c_ldsd_off(hw)) // C.SD
+        _ => Instr::Unsupported(hw)
+      }
+    1 =>
+      match f3 {
+        0 => {
+          let rd = (hw >> 7) & 0x1F
+          Instr::OpImm(0, rd, rd, c_imm6(hw), 0) // C.ADDI
+        }
+        1 => {
+          let rd = (hw >> 7) & 0x1F
+          Instr::OpImm32(0, rd, rd, c_imm6(hw), 0) // C.ADDIW
+        }
+        2 => Instr::OpImm(0, (hw >> 7) & 0x1F, 0, c_imm6(hw), 0) // C.LI
+        3 => {
+          let rd = (hw >> 7) & 0x1F
+          if rd == 2 {
+            let imm = sign_extend(
+              (((hw >> 12) & 1) << 9) | (((hw >> 3) & 3) << 7) |
+              (((hw >> 5) & 1) << 6) | (((hw >> 2) & 1) << 5) |
+              (((hw >> 6) & 1) << 4),
+              10,
+            )
+            Instr::OpImm(0, 2, 2, imm, 0) // C.ADDI16SP
+          } else {
+            Instr::Lui(rd, c_imm6(hw) << 12) // C.LUI
+          }
+        }
+        4 => {
+          let rs1 = 8 + ((hw >> 7) & 7)
+          match (hw >> 10) & 3 {
+            0 => Instr::OpImm(5, rs1, rs1, c_shamt(hw), 0) // C.SRLI
+            1 => Instr::OpImm(5, rs1, rs1, c_shamt(hw), 0x20) // C.SRAI
+            2 => Instr::OpImm(7, rs1, rs1, c_imm6(hw), 0) // C.ANDI
+            _ => {
+              let rs2 = 8 + ((hw >> 2) & 7)
+              if ((hw >> 12) & 1) == 0 {
+                match (hw >> 5) & 3 {
+                  0 => Instr::Op(0, rs1, rs1, rs2, 0x20) // C.SUB
+                  1 => Instr::Op(4, rs1, rs1, rs2, 0) // C.XOR
+                  2 => Instr::Op(6, rs1, rs1, rs2, 0) // C.OR
+                  _ => Instr::Op(7, rs1, rs1, rs2, 0) // C.AND
+                }
+              } else {
+                match (hw >> 5) & 3 {
+                  0 => Instr::Op32(0, rs1, rs1, rs2, 0x20) // C.SUBW
+                  1 => Instr::Op32(0, rs1, rs1, rs2, 0) // C.ADDW
+                  _ => Instr::Unsupported(hw)
+                }
+              }
+            }
+          }
+        }
+        5 => Instr::Jal(0, c_j_imm(hw)) // C.J
+        6 => Instr::Branch(0, 8 + ((hw >> 7) & 7), 0, c_b_imm(hw)) // C.BEQZ
+        _ => Instr::Branch(1, 8 + ((hw >> 7) & 7), 0, c_b_imm(hw)) // C.BNEZ
+      }
+    2 =>
+      match f3 {
+        0 => Instr::OpImm(1, (hw >> 7) & 0x1F, (hw >> 7) & 0x1F, c_shamt(hw), 0) // C.SLLI
+        2 => {
+          // C.LWSP (present in both RV32C and RV64C)
+          let rd = (hw >> 7) & 0x1F
+          let off = (((hw >> 12) & 1) << 5) | (((hw >> 4) & 7) << 2) |
+            (((hw >> 2) & 3) << 6)
+          Instr::Load(2, rd, 2, off)
+        }
+        3 => Instr::Load(3, (hw >> 7) & 0x1F, 2, c_ldsp_off(hw)) // C.LDSP
+        4 => {
+          let rs1 = (hw >> 7) & 0x1F
+          let rs2 = (hw >> 2) & 0x1F
+          if ((hw >> 12) & 1) == 0 {
+            if rs2 == 0 {
+              Instr::Jalr(0, rs1, 0) // C.JR
+            } else {
+              Instr::Op(0, rs1, 0, rs2, 0) // C.MV
+            }
+          } else if rs1 == 0 && rs2 == 0 {
+            Instr::Ebreak
+          } else if rs2 == 0 {
+            Instr::Jalr(1, rs1, 0) // C.JALR
+          } else {
+            Instr::Op(0, rs1, rs1, rs2, 0) // C.ADD
+          }
+        }
+        6 => {
+          // C.SWSP (present in both RV32C and RV64C)
+          let rs2 = (hw >> 2) & 0x1F
+          let off = (((hw >> 9) & 0xF) << 2) | (((hw >> 7) & 3) << 6)
+          Instr::Store(2, 2, rs2, off)
+        }
+        7 => Instr::Store(3, 2, (hw >> 2) & 0x1F, c_sdsp_off(hw)) // C.SDSP
+        _ => Instr::Unsupported(hw)
+      }
+    _ => Instr::Unsupported(hw)
+  }
+}

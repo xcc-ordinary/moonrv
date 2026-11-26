@@ -78,6 +78,7 @@ PASS rv64ua-p-amoswap_w
 PASS rv64ua-p-amoxor_d
 PASS rv64ua-p-amoxor_w
 PASS rv64ua-p-lrsc
+PASS rv64uc-p-rvc
 PASS rv64ui-p-add
 PASS rv64ui-p-addi
 PASS rv64ui-p-addiw
@@ -146,4 +147,4 @@ PASS rv64um-p-remu
 PASS rv64um-p-remuw
 PASS rv64um-p-remw
 ----
-riscv-tests: 147/147 passed
+riscv-tests: 148/148 passed
