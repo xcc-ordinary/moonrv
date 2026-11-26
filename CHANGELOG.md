@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.0.5 — RV32IMAC + RV64IMAC, real C programs, bench
+
+- **A extension** (RV32A + RV64A): `Instr::Atomic` decode; LR/SC reservation
+  tracked by address and invalidated by intervening stores; AMO
+  swap/add/xor/and/or/min/max/minu/maxu in W and D widths. `rv32ua` 10 + `rv64ua` 19.
+- **RV64C**: `decode_compressed64` (C.LD/SD/LDSP/SDSP, C.ADDIW, C.SUBW/ADDW,
+  keeps C.LWSP/C.SWSP). `rv64uc-p-rvc` green.
+- **Real gcc-compiled C**: freestanding `fib.c` / `sieve.c` (-O2, no libc) run
+  end-to-end. New syscalls mmap/munmap/getpid; Hart initializes sp from the
+  memory window so C stack frames work.
+- **bench CLI**: `moonrv bench [name]` reports executed-instruction counts;
+  default sieve kernel on RV32/RV64 (primes<8192=1028, 123707 instructions).
+- **Acceptance: official matrix 148/148**, 19 tests green on wasm + wasm-gc.
+
 ## 0.0.4 — differential vs QEMU + trace/disasm CLI + wider syscalls
 
 - **Differential harness**: `scripts/gen_diff.py` generates seeded random RV32IM
