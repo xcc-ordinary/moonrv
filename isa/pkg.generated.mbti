@@ -17,11 +17,18 @@ pub fn sign_extend(Int32, Int32) -> Int32
 pub(all) enum Instr {
   Lui(Int32, Int32)
   Auipc(Int32, Int32)
-  Addi(Int32, Int32, Int32)
-  Add(Int32, Int32, Int32)
-  Sub(Int32, Int32, Int32)
+  Jal(Int32, Int32)
+  Jalr(Int32, Int32, Int32)
+  Branch(Int32, Int32, Int32, Int32)
+  Load(Int32, Int32, Int32, Int32)
+  Store(Int32, Int32, Int32, Int32)
+  OpImm(Int32, Int32, Int32, Int32, Int32)
+  Op(Int32, Int32, Int32, Int32, Int32)
+  Csr(Int32, Int32, Int32, Int32)
   Ecall
   Ebreak
+  Mret
+  Fence
   Unsupported(Int32)
 }
 

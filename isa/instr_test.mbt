@@ -34,3 +34,13 @@ test "decode sw x2, 8(x1)" {
   // 0x0020A423 = sw x2, 8(x1)
   assert_eq(@isa.decode(0x0020A423), @isa.Instr::Store(2, 1, 2, 8))
 }
+
+///|
+test "rvc c.lwsp a0, 12(sp)" {
+  assert_eq(@isa.decode_compressed(0x4532), @isa.Instr::Load(2, 10, 2, 12))
+}
+
+///|
+test "rvc c.swsp a0, 12(sp)" {
+  assert_eq(@isa.decode_compressed(0xC62A), @isa.Instr::Store(2, 2, 10, 12))
+}

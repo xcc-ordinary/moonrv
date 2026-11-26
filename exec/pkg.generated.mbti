@@ -15,16 +15,27 @@ import {
 pub struct Hart {
   regs : @machine.RegFile
   mem : @memory.Memory
+  csrs : @machine.CsrFile
   mut pc : Int32
+  tohost : Int32
+  mut halted : Bool
+  mut pass : Bool
+  mut fail_code : Int32
+  mut exit_code : Int32
+  mut bad_word : Int32
+  mut steps : Int32
+  stdout : Array[Int32]
 }
 pub fn Hart::new(@memory.Memory) -> Self
+pub fn Hart::new_at(@memory.Memory, Int32, Int32) -> Self
+pub fn Hart::run(Self, Int32) -> Bool
+pub fn Hart::stdout_string(Self) -> String
 pub fn Hart::step(Self) -> StepResult
 
 #derive(Eq, @debug.Debug)
 pub(all) enum StepResult {
   Ok
-  Ecall
-  Ebreak
+  Halted
   Unsupported(Int32)
 }
 

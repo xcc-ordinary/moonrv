@@ -68,11 +68,57 @@ fn srl32(a : Int, n : Int) -> Int {
 }
 
 ///|
+// Zero-extend a 32-bit Int to a non-negative Int64 (its unsigned value).
+fn to_u64(x : Int) -> Int64 {
+  if x < 0 {
+    x.to_int64() + 4294967296L
+  } else {
+    x.to_int64()
+  }
+}
+
+///|
+// MULH: high 32 bits of signed×signed product.
+fn mulh(a : Int, b : Int) -> Int {
+  ((a.to_int64() * b.to_int64()) >> 32).to_int()
+}
+
+///|
+// MULHSU: high 32 bits of signed×unsigned product.
+fn mulhsu(a : Int, b : Int) -> Int {
+  ((a.to_int64() * to_u64(b)) >> 32).to_int()
+}
+
+///|
+// MULHU: high 32 bits of unsigned×unsigned product, via 16-bit limbs so the
+// intermediate sums never overflow Int64.
+fn mulhu(a : Int, b : Int) -> Int {
+  let al = (a & 0xFFFF).to_int64()
+  let ah = ((a >> 16) & 0xFFFF).to_int64()
+  let bl = (b & 0xFFFF).to_int64()
+  let bh = ((b >> 16) & 0xFFFF).to_int64()
+  let ll = al * bl
+  let mid = ah * bl + al * bh + (ll >> 16)
+  (ah * bh + (mid >> 16)).to_int()
+}
+
+///|
+fn udiv(a : Int, b : Int) -> Int {
+  (to_u64(a) / to_u64(b)).to_int()
+}
+
+///|
+fn urem(a : Int, b : Int) -> Int {
+  (to_u64(a) % to_u64(b)).to_int()
+}
+
+///|
 // Linux user-mode syscalls used by the milestone programs: write(64),
 // exit(93), read(63, returns EOF). Unknown numbers return -ENOSYS in a0.
 fn Hart::ecall(self : Hart) -> StepResult {
   let num = self.regs.get(17)
   let a0 = self.regs.get(10)
+  let next = self.pc + 4
   match num {
     93 => {
       self.exit_code = a0
@@ -90,17 +136,17 @@ fn Hart::ecall(self : Hart) -> StepResult {
         self.stdout.push(self.mem.read_u8(buf + i))
       }
       self.regs.set(10, len)
-      self.pc = self.pc + 4
+      self.pc = next
       StepResult::Ok
     }
     63 => {
       self.regs.set(10, 0)
-      self.pc = self.pc + 4
+      self.pc = next
       StepResult::Ok
     }
     _ => {
       self.regs.set(10, -1)
-      self.pc = self.pc + 4
+      self.pc = next
       StepResult::Ok
     }
   }
@@ -109,26 +155,33 @@ fn Hart::ecall(self : Hart) -> StepResult {
 ///|
 // Execute one instruction at pc. Full RV32I + Zicsr + MRET + FENCE.
 pub fn Hart::step(self : Hart) -> StepResult {
-  let word = self.mem.read_u32(self.pc)
-  match @isa.decode(word) {
+  let hw = self.mem.read_u16(self.pc)
+  let mut ilen = 4
+  let mut instr = @isa.decode(self.mem.read_u32(self.pc))
+  if (hw & 3) != 3 {
+    // RVC: low two bits != 11 marks a 16-bit compressed instruction.
+    ilen = 2
+    instr = @isa.decode_compressed(hw)
+  }
+  match instr {
     @isa.Instr::Lui(rd, imm) => {
       self.regs.set(rd, imm)
-      self.pc = self.pc + 4
+      self.pc = self.pc + ilen
       StepResult::Ok
     }
     @isa.Instr::Auipc(rd, imm) => {
       self.regs.set(rd, self.pc + imm)
-      self.pc = self.pc + 4
+      self.pc = self.pc + ilen
       StepResult::Ok
     }
     @isa.Instr::Jal(rd, imm) => {
-      self.regs.set(rd, self.pc + 4)
+      self.regs.set(rd, self.pc + ilen)
       self.pc = self.pc + imm
       StepResult::Ok
     }
     @isa.Instr::Jalr(rd, rs1, imm) => {
       let target = (self.regs.get(rs1) + imm) & (-2)
-      self.regs.set(rd, self.pc + 4)
+      self.regs.set(rd, self.pc + ilen)
       self.pc = target
       StepResult::Ok
     }
@@ -147,7 +200,7 @@ pub fn Hart::step(self : Hart) -> StepResult {
       if taken {
         self.pc = self.pc + imm
       } else {
-        self.pc = self.pc + 4
+        self.pc = self.pc + ilen
       }
       StepResult::Ok
     }
@@ -162,7 +215,7 @@ pub fn Hart::step(self : Hart) -> StepResult {
         _ => 0
       }
       self.regs.set(rd, value)
-      self.pc = self.pc + 4
+      self.pc = self.pc + ilen
       StepResult::Ok
     }
     @isa.Instr::Store(f3, rs1, rs2, imm) => {
@@ -174,7 +227,7 @@ pub fn Hart::step(self : Hart) -> StepResult {
         2 => self.mem.write_u32(addr, value)
         _ => ()
       }
-      self.pc = self.pc + 4
+      self.pc = self.pc + ilen
       if self.tohost >= 0 && addr == self.tohost {
         self.pass = value == 1
         if value != 1 {
@@ -213,13 +266,53 @@ pub fn Hart::step(self : Hart) -> StepResult {
         _ => 0
       }
       self.regs.set(rd, value)
-      self.pc = self.pc + 4
+      self.pc = self.pc + ilen
       StepResult::Ok
     }
     @isa.Instr::Op(f3, rd, rs1, rs2, f7) => {
       if f7 == 1 {
-        // M extension (MUL/DIV/REM) is week-2 work.
-        StepResult::Unsupported(word)
+        // M extension: MUL / MULH / MULHSU / MULHU / DIV / DIVU / REM / REMU.
+        let a = self.regs.get(rs1)
+        let b = self.regs.get(rs2)
+        let min_int = -2147483647 - 1
+        let value = match f3 {
+          0 => a * b
+          1 => mulh(a, b)
+          2 => mulhsu(a, b)
+          3 => mulhu(a, b)
+          4 =>
+            if b == 0 {
+              -1
+            } else if a == min_int && b == -1 {
+              min_int
+            } else {
+              a / b
+            }
+          5 =>
+            if b == 0 {
+              -1
+            } else {
+              udiv(a, b)
+            }
+          6 =>
+            if b == 0 {
+              a
+            } else if a == min_int && b == -1 {
+              0
+            } else {
+              a % b
+            }
+          7 =>
+            if b == 0 {
+              a
+            } else {
+              urem(a, b)
+            }
+          _ => 0
+        }
+        self.regs.set(rd, value)
+        self.pc = self.pc + ilen
+        StepResult::Ok
       } else {
         let a = self.regs.get(rs1)
         let b = self.regs.get(rs2)
@@ -251,7 +344,7 @@ pub fn Hart::step(self : Hart) -> StepResult {
           _ => 0
         }
         self.regs.set(rd, value)
-        self.pc = self.pc + 4
+        self.pc = self.pc + ilen
         StepResult::Ok
       }
     }
@@ -283,7 +376,7 @@ pub fn Hart::step(self : Hart) -> StepResult {
         _ => ()
       }
       self.regs.set(rd, old)
-      self.pc = self.pc + 4
+      self.pc = self.pc + ilen
       StepResult::Ok
     }
     @isa.Instr::Ecall => self.ecall()
@@ -296,7 +389,7 @@ pub fn Hart::step(self : Hart) -> StepResult {
       StepResult::Ok
     }
     @isa.Instr::Fence => {
-      self.pc = self.pc + 4
+      self.pc = self.pc + ilen
       StepResult::Ok
     }
     @isa.Instr::Unsupported(w) => StepResult::Unsupported(w)

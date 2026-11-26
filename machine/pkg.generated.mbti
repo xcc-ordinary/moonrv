@@ -6,6 +6,13 @@ package "xcc-ordinary/moonrv/machine"
 // Errors
 
 // Types and methods
+pub struct CsrFile {
+  vals : Array[Int32]
+}
+pub fn CsrFile::get(Self, Int32) -> Int32
+pub fn CsrFile::new() -> Self
+pub fn CsrFile::set(Self, Int32, Int32) -> Unit
+
 pub struct RegFile {
   regs : Array[Int32]
 }
