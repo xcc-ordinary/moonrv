@@ -1,0 +1,9 @@
+import {
+  "moonbitlang/core/env",
+  "xcc-ordinary/moonrv/exec",
+  "xcc-ordinary/moonrv/memory",
+}
+
+pkgtype(kind: "executable")
+
+supported_targets = "-all+native+wasm"

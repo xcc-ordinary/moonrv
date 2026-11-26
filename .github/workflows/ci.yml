@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: MoonBit check, build & test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install MoonBit
+        run: |
+          curl -fsSL https://cli.moonbitlang.com/install/unix.sh | bash
+          echo "$HOME/.moon/bin" >> "$GITHUB_PATH"
+
+      - name: Update registry
+        run: moon update
+
+      - name: Check (wasm)
+        run: moon check --target wasm
+
+      - name: Build (wasm)
+        run: moon build --target wasm
+
+      - name: Test (wasm, full suite)
+        run: moon test --target wasm
+
+      - name: Test (wasm-gc, pure logic)
+        run: moon test --target wasm-gc
+
+      - name: Demo (walking skeleton)
+        run: moon run cmd/moonrv --target wasm -- demo
+
+  # Future job (week 2+): differential verification vs spike / qemu-riscv-user
+  # over the vendored riscv-tests ELFs. Kept separate so compliance results are
+  # an independent, reproducible CI artifact.
+  # riscv-tests:
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v5
+  #     - run: sudo apt-get update && sudo apt-get install -y qemu-user
+  #     - run: bash scripts/run-riscv-tests.sh

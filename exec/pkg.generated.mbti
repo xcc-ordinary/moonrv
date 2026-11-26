@@ -1,0 +1,33 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "xcc-ordinary/moonrv/exec"
+
+import {
+  "moonbitlang/core/debug",
+  "xcc-ordinary/moonrv/machine",
+  "xcc-ordinary/moonrv/memory",
+}
+
+// Values
+
+// Errors
+
+// Types and methods
+pub struct Hart {
+  regs : @machine.RegFile
+  mem : @memory.Memory
+  mut pc : Int32
+}
+pub fn Hart::new(@memory.Memory) -> Self
+pub fn Hart::step(Self) -> StepResult
+
+#derive(Eq, @debug.Debug)
+pub(all) enum StepResult {
+  Ok
+  Ecall
+  Ebreak
+  Unsupported(Int32)
+}
+
+// Type aliases
+
+// Traits

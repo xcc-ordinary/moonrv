@@ -1,0 +1,18 @@
+// Generated using `moon info`, DON'T EDIT IT
+package "xcc-ordinary/moonrv/machine"
+
+// Values
+
+// Errors
+
+// Types and methods
+pub struct RegFile {
+  regs : Array[Int32]
+}
+pub fn RegFile::get(Self, Int32) -> Int32
+pub fn RegFile::new() -> Self
+pub fn RegFile::set(Self, Int32, Int32) -> Unit
+
+// Type aliases
+
+// Traits
